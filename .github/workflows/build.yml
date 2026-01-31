@@ -1,0 +1,230 @@
+name: Build CarDash APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Cache kapalı: senin aldığın "failed to save cache" problemini keser
+      - name: Setup Gradle (no cache)
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.7
+          cache-disabled: true
+
+      - name: Generate Android project (if missing)
+        run: |
+          if [ ! -f settings.gradle ]; then
+            mkdir -p app/src/main/java/com/mycardash
+            mkdir -p app/src/main/res/values
+            mkdir -p app/src/main
+
+            cat > settings.gradle <<'EOF'
+pluginManagement {
+  repositories { google(); mavenCentral(); gradlePluginPortal() }
+}
+dependencyResolutionManagement {
+  repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+  repositories { google(); mavenCentral() }
+}
+rootProject.name = "CarDash"
+include(":app")
+EOF
+
+            cat > build.gradle <<'EOF'
+plugins {
+  id "com.android.application" version "8.2.2" apply false
+  id "org.jetbrains.kotlin.android" version "1.9.22" apply false
+}
+EOF
+
+            cat > gradle.properties <<'EOF'
+android.useAndroidX=true
+kotlin.code.style=official
+org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+EOF
+
+            cat > app/build.gradle <<'EOF'
+plugins {
+  id "com.android.application"
+  id "org.jetbrains.kotlin.android"
+}
+
+android {
+  namespace "com.mycardash"
+  compileSdk 34
+
+  defaultConfig {
+    applicationId "com.mycardash"
+    minSdk 26
+    targetSdk 34
+    versionCode 1
+    versionName "1.0"
+  }
+
+  buildFeatures { compose true }
+
+  composeOptions { kotlinCompilerExtensionVersion "1.5.8" }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+  kotlinOptions { jvmTarget = "17" }
+}
+
+dependencies {
+  implementation platform("androidx.compose:compose-bom:2024.02.02")
+  implementation "androidx.activity:activity-compose:1.8.2"
+  implementation "androidx.compose.material3:material3"
+  implementation "androidx.compose.ui:ui"
+  implementation "androidx.compose.ui:ui-tooling-preview"
+  debugImplementation "androidx.compose.ui:ui-tooling"
+
+  // MediaSession: YouTube Music kontrolü için
+  implementation "androidx.media:media:1.7.0"
+}
+EOF
+
+            cat > app/src/main/AndroidManifest.xml <<'EOF'
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+  <application
+    android:label="CarDash"
+    android:theme="@style/Theme.CarDash">
+    <activity
+      android:name=".MainActivity"
+      android:exported="true"
+      android:screenOrientation="landscape"
+      android:launchMode="singleTask">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.LAUNCHER"/>
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>
+EOF
+
+            cat > app/src/main/res/values/themes.xml <<'EOF'
+<resources>
+  <style name="Theme.CarDash" parent="Theme.Material3.DayNight.NoActionBar"/>
+</resources>
+EOF
+
+            cat > app/src/main/java/com/mycardash/MainActivity.kt <<'EOF'
+package com.mycardash
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+
+class MainActivity : ComponentActivity() {
+  override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    setContent { MaterialTheme { CarDash() } }
+  }
+
+  private fun openMaps() {
+    // Direkt Google Maps aç
+    val i = Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=")).apply {
+      setPackage("com.google.android.apps.maps")
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    startActivity(i)
+  }
+
+  @Composable
+  fun CarDash() {
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+
+      Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+
+        // MAP PREVIEW CARD (tıklayınca Maps)
+        Card(
+          modifier = Modifier
+            .weight(1.2f)
+            .fillMaxHeight()
+            .clickable { openMaps() }
+        ) {
+          Box(Modifier.fillMaxSize().padding(16.dp)) {
+            Column {
+              Text("Harita", style = MaterialTheme.typography.headlineSmall)
+              Spacer(Modifier.height(10.dp))
+              Text("Önizleme: Son rota / Yakın konumlar", style = MaterialTheme.typography.bodyLarge)
+              Spacer(Modifier.height(10.dp))
+              Text("Dokun → Google Maps aç", style = MaterialTheme.typography.bodyMedium)
+            }
+          }
+        }
+
+        // MEDIA CARD (şimdilik UI; yarın gerçek YouTube Music kontrol ekleyeceğiz)
+        Card(
+          modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+        ) {
+          Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("YouTube Music", style = MaterialTheme.typography.headlineSmall)
+            Text("Parça: (çalan medya yakalanacak)", style = MaterialTheme.typography.bodyLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+              Button(onClick = {}) { Text("⏮") }
+              Button(onClick = {}) { Text("⏯") }
+              Button(onClick = {}) { Text("⏭") }
+            }
+            Text("Not: YTM çalarken MediaSession ile bağlayacağız.", style = MaterialTheme.typography.bodySmall)
+          }
+        }
+      }
+
+      // DOCK
+      Card(Modifier.fillMaxWidth()) {
+        Row(
+          Modifier.fillMaxWidth().padding(12.dp),
+          horizontalArrangement = Arrangement.SpaceEvenly,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text("Home")
+          Text("Maps")
+          Text("Music")
+          Text("Apps")
+          Text("Phone")
+        }
+      }
+    }
+  }
+}
+EOF
+          fi
+
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper
+
+      - name: Build Debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: cardash-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
